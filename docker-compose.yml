@@ -1,0 +1,125 @@
+# Docker & Payment API Server - Docker Compose 설정
+# 
+# 사용법:
+#   1. .env.example을 .env로 복사하고 값 설정
+#   2. docker-compose up -d
+#   3. http://localhost:8080/api/v1/ 접속
+#
+# 포트원 API 설정:
+#   .env 파일에 PORTONE_API_KEY와 PORTONE_API_SECRET 설정 필요
+
+version: '3.8'
+
+services:
+  # ========================================
+  # API 서버
+  # ========================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: payment-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8080}:80"
+    environment:
+      # Database
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_NAME=${DB_NAME:-docker_api}
+      - DB_USER=${DB_USER:-api_user}
+      - DB_PASS=${DB_PASS:-api_password}
+      # API
+      - API_DEBUG=${API_DEBUG:-false}
+      # PortOne
+      - PORTONE_API_KEY=${PORTONE_API_KEY:-}
+      - PORTONE_API_SECRET=${PORTONE_API_SECRET:-}
+      - PORTONE_IMP_CODE=${PORTONE_IMP_CODE:-}
+      - PORTONE_WEBHOOK_ENABLED=${PORTONE_WEBHOOK_ENABLED:-true}
+      # Payment
+      - PAYMENT_DEFAULT_CURRENCY=${PAYMENT_DEFAULT_CURRENCY:-KRW}
+      - PAYMENT_NOTIFICATION_EMAIL=${PAYMENT_NOTIFICATION_EMAIL:-}
+    volumes:
+      # 개발 시 소스 코드 마운트 (선택사항)
+      # - .:/var/www/html
+      # 로그 영구 저장
+      - api_logs:/var/log/api
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - payment-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/v1/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ========================================
+  # MySQL 데이터베이스
+  # ========================================
+  db:
+    image: mysql:8.0
+    container_name: payment-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASS:-root_password}
+      - MYSQL_DATABASE=${DB_NAME:-docker_api}
+      - MYSQL_USER=${DB_USER:-api_user}
+      - MYSQL_PASSWORD=${DB_PASS:-api_password}
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      # 데이터 영구 저장
+      - db_data:/var/lib/mysql
+      # 초기화 스크립트
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    networks:
+      - payment-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASS:-root_password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ========================================
+  # phpMyAdmin (개발용 - 선택사항)
+  # ========================================
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: payment-phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "${PMA_PORT:-8081}:80"
+    environment:
+      - PMA_HOST=db
+      - PMA_USER=${DB_USER:-api_user}
+      - PMA_PASSWORD=${DB_PASS:-api_password}
+    depends_on:
+      - db
+    networks:
+      - payment-network
+    profiles:
+      - dev
+
+# ========================================
+# 네트워크
+# ========================================
+networks:
+  payment-network:
+    driver: bridge
+
+# ========================================
+# 볼륨
+# ========================================
+volumes:
+  db_data:
+    driver: local
+  api_logs:
+    driver: local

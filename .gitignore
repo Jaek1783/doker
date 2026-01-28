@@ -1,0 +1,32 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Cache
+cache/
+*.cache
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Vendor (if using composer)
+/vendor/
+
+# Temporary files
+tmp/
+temp/
+
+# Uploads
+uploads/
