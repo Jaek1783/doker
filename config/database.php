@@ -3,13 +3,14 @@
  * Database & API Configuration
  * 
  * Docker API 및 포트원 결제 API 설정
- * - DB 연결 설정
+ * - Platform DB 연결 설정
+ * - 사이트별 결제 DB 연결 설정
  * - 포트원 API 설정
  * - 기타 API 설정
  */
 
 // ========================================
-// 데이터베이스 설정
+// 데이터베이스 설정 (Platform DB)
 // ========================================
 
 $dbConfig = [
@@ -22,7 +23,7 @@ $dbConfig = [
 ];
 
 /**
- * DB 연결 함수
+ * Platform DB 연결 함수
  * 
  * @return PDO|null PDO 인스턴스 또는 연결 실패 시 null
  */
@@ -44,11 +45,78 @@ function getDbConnection(): ?PDO {
         ]);
         return $pdo;
     } catch (PDOException $e) {
-        if (API_DEBUG) {
-            error_log('Database connection failed: ' . $e->getMessage());
+        if (defined('API_DEBUG') && API_DEBUG) {
+            error_log('Platform DB connection failed: ' . $e->getMessage());
         }
         return null;
     }
+}
+
+/**
+ * 사이트 전용 DB에 연결
+ * 
+ * @param string $dbName 사이트 전용 DB 이름
+ * @return PDO|null
+ */
+function getSiteDbConnectionByDbName(string $dbName): ?PDO {
+    global $dbConfig;
+
+    static $sitePdos = [];
+
+    if (isset($sitePdos[$dbName])) {
+        return $sitePdos[$dbName];
+    }
+
+    try {
+        $dsn = "mysql:host={$dbConfig['host']};port={$dbConfig['port']};dbname={$dbName};charset={$dbConfig['charset']}";
+        $pdo = new PDO($dsn, $dbConfig['username'], $dbConfig['password'], [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false
+        ]);
+        $sitePdos[$dbName] = $pdo;
+        return $pdo;
+    } catch (PDOException $e) {
+        if (defined('API_DEBUG') && API_DEBUG) {
+            error_log('Site DB connection failed: ' . $e->getMessage());
+        }
+        return null;
+    }
+}
+
+/**
+ * site_id로 사이트 DB에 연결
+ * 
+ * @param string $siteId
+ * @return PDO|null
+ */
+function getSiteDbConnectionBySiteId(string $siteId): ?PDO {
+    $platformPdo = getDbConnection();
+    if (!$platformPdo) {
+        return null;
+    }
+
+    $stmt = $platformPdo->prepare('SELECT db_name FROM sites WHERE site_id = ? AND status = "active" LIMIT 1');
+    $stmt->execute([$siteId]);
+    $row = $stmt->fetch();
+
+    if (!$row || empty($row['db_name'])) {
+        return null;
+    }
+
+    return getSiteDbConnectionByDbName($row['db_name']);
+}
+
+/**
+ * 현재 요청 컨텍스트에서 사이트 DB 연결 가져오기
+ * 
+ * 미들웨어에서 전역 변수 CURRENT_SITE_DB_NAME 를 설정한다고 가정
+ */
+function getCurrentSiteDbConnection(): ?PDO {
+    if (!isset($GLOBALS['CURRENT_SITE_DB_NAME'])) {
+        return null;
+    }
+    return getSiteDbConnectionByDbName($GLOBALS['CURRENT_SITE_DB_NAME']);
 }
 
 // ========================================

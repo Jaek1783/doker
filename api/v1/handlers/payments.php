@@ -26,7 +26,11 @@ function handlePayments(string $method, ?string $resourceId, ?string $action): v
         errorResponse('PortOne API not configured: ' . $e->getMessage(), 500);
     }
     
-    $pdo = getDbConnection();
+    // 현재 요청은 index.php 에서 API 키로 사이트 컨텍스트가 설정된 상태여야 한다.
+    $pdo = getCurrentSiteDbConnection();
+    if (!$pdo) {
+        errorResponse('Site database not available', 500);
+    }
     
     switch ($method) {
         case 'GET':

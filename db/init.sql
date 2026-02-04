@@ -61,6 +61,72 @@ INSERT INTO system_settings (setting_key, setting_value, description) VALUES
 ON DUPLICATE KEY UPDATE setting_key = setting_key;
 
 -- ========================================
+-- Platform DB (멀티사이트 메타데이터)
+-- ========================================
+
+-- 사이트 정보
+CREATE TABLE IF NOT EXISTS sites (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    site_id VARCHAR(64) NOT NULL UNIQUE COMMENT '외부 노출용 사이트 ID',
+    name VARCHAR(255) NOT NULL,
+    domain VARCHAR(255) NULL,
+    contact_email VARCHAR(255) NULL,
+    db_name VARCHAR(128) NOT NULL COMMENT '사이트 전용 DB 이름',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_status (status),
+    INDEX idx_domain (domain)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='결제 서비스에 연결된 사이트 목록';
+
+-- 사이트별 API 키
+CREATE TABLE IF NOT EXISTS site_api_keys (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    site_id VARCHAR(64) NOT NULL,
+    api_key_hash CHAR(64) NOT NULL COMMENT 'SHA-256 해시',
+    name VARCHAR(100) NOT NULL DEFAULT 'default',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    last_used_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_site_id (site_id),
+    INDEX idx_status (status),
+    INDEX idx_api_key_hash (api_key_hash),
+    CONSTRAINT fk_site_api_keys_site
+        FOREIGN KEY (site_id) REFERENCES sites(site_id)
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사이트별 API 키';
+
+-- 사이트 관리자
+CREATE TABLE IF NOT EXISTS site_admins (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    site_id VARCHAR(64) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    name VARCHAR(100) NULL,
+    role VARCHAR(50) NOT NULL DEFAULT 'site_admin',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_site_email (site_id, email),
+    INDEX idx_site_id (site_id),
+    INDEX idx_status (status),
+    CONSTRAINT fk_site_admins_site
+        FOREIGN KEY (site_id) REFERENCES sites(site_id)
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사이트 관리자 계정';
+
+-- 플랫폼 관리자 (선택)
+CREATE TABLE IF NOT EXISTS platform_admins (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    name VARCHAR(100) NULL,
+    role VARCHAR(50) NOT NULL DEFAULT 'platform_admin',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='플랫폼 전체 관리자 계정';
+
+-- ========================================
 -- 포트원 결제 API 테이블
 -- ========================================
 

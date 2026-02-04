@@ -25,7 +25,10 @@ function handleSubscriptions(string $method, ?string $resourceId, ?string $actio
         errorResponse('PortOne API not configured: ' . $e->getMessage(), 500);
     }
     
-    $pdo = getDbConnection();
+    $pdo = getCurrentSiteDbConnection();
+    if (!$pdo) {
+        errorResponse('Site database not available', 500);
+    }
     
     // 라우팅
     switch ($resourceId) {

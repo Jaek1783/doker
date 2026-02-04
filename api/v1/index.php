@@ -24,6 +24,12 @@ if (file_exists($configPath)) {
     require_once $configPath;
 }
 
+// 테넌트 유틸 로드
+$tenantPath = __DIR__ . '/lib/Tenant.php';
+if (file_exists($tenantPath)) {
+    require_once $tenantPath;
+}
+
 // 요청 정보 파싱
 $requestUri = $_SERVER['REQUEST_URI'];
 $requestMethod = $_SERVER['REQUEST_METHOD'];
@@ -76,6 +82,51 @@ function execDocker($command) {
 $resource = $segments[0] ?? '';
 $resourceId = $segments[1] ?? null;
 $action = $segments[2] ?? null;
+
+// 사이트 컨텍스트 설정 (payments / subscriptions 전용)
+if (in_array($resource, ['payments', 'subscriptions'], true)) {
+    $headers = function_exists('getallheaders') ? getallheaders() : [];
+    $apiKey = null;
+
+    if (isset($headers['X-API-Key'])) {
+        $apiKey = trim($headers['X-API-Key']);
+    } elseif (isset($headers['Authorization'])) {
+        // Authorization: Bearer xxx
+        if (preg_match('/Bearer\\s+(.*)$/i', $headers['Authorization'], $m)) {
+            $apiKey = trim($m[1]);
+        }
+    }
+
+    if (!$apiKey) {
+        errorResponse('Missing API key', 401);
+    }
+
+    $platformPdo = getDbConnection();
+    if (!$platformPdo) {
+        errorResponse('Platform database not available', 500);
+    }
+
+    $apiKeyHash = hashApiKey($apiKey);
+    $stmt = $platformPdo->prepare('
+        SELECT s.site_id, s.db_name 
+        FROM site_api_keys k 
+        INNER JOIN sites s ON k.site_id = s.site_id 
+        WHERE k.api_key_hash = ? 
+          AND k.status = "active" 
+          AND s.status = "active"
+        LIMIT 1
+    ');
+    $stmt->execute([$apiKeyHash]);
+    $row = $stmt->fetch();
+
+    if (!$row) {
+        errorResponse('Invalid API key', 401);
+    }
+
+    // 전역 컨텍스트에 현재 사이트 저장
+    $GLOBALS['CURRENT_SITE_ID'] = $row['site_id'];
+    $GLOBALS['CURRENT_SITE_DB_NAME'] = $row['db_name'];
+}
 
 switch ($resource) {
     case '':
@@ -146,6 +197,12 @@ switch ($resource) {
     case 'webhooks':
         require_once __DIR__ . '/handlers/webhooks.php';
         handleWebhooks($requestMethod, $resourceId, $action);
+        break;
+
+    // 사이트 등록 / 관리
+    case 'sites':
+        require_once __DIR__ . '/handlers/sites.php';
+        handleSites($requestMethod, $resourceId, $action);
         break;
 
     default:

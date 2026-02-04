@@ -45,23 +45,24 @@ function handleWebhooks(string $method, ?string $resourceId, ?string $action): v
  */
 function handlePortoneWebhook(): void
 {
-    $pdo = getDbConnection();
-    
     // 웹훅 데이터 파싱
     $input = getWebhookInput();
     
     // 필수 필드 검증
     if (empty($input['imp_uid'])) {
-        logWebhook($pdo, 'portone', $input, 'error', 'Missing imp_uid');
+        // 플랫폼 DB에만 최소한의 로그 남김
+        $platformPdo = getDbConnection();
+        logWebhook($platformPdo, 'portone', $input, 'error', 'Missing imp_uid');
         errorResponse('imp_uid is required', 400);
     }
     
+    $platformPdo = getDbConnection();
     $impUid = $input['imp_uid'];
     $merchantUid = $input['merchant_uid'] ?? null;
     $status = $input['status'] ?? null;
     
     // 웹훅 수신 로그 저장
-    logWebhook($pdo, 'portone', $input, 'received');
+    logWebhook($platformPdo, 'portone', $input, 'received');
     
     try {
         // 포트원 API로 결제 정보 검증 (보안 - 위변조 방지)
@@ -69,33 +70,51 @@ function handlePortoneWebhook(): void
         $paymentResult = $portone->getPayment($impUid);
         
         if ($paymentResult['code'] !== 0) {
-            logWebhook($pdo, 'portone', $input, 'error', 'Payment not found in PortOne');
+            logWebhook($platformPdo, 'portone', $input, 'error', 'Payment not found in PortOne');
             errorResponse('Payment verification failed', 400);
         }
         
         $payment = $paymentResult['response'];
+
+        // merchant_uid에서 site_id 추출 (규칙: {site_id}__local_id)
+        $siteId = null;
+        if (!empty($payment['merchant_uid']) && strpos($payment['merchant_uid'], '__') !== false) {
+            [$candidateSiteId,] = explode('__', $payment['merchant_uid'], 2);
+            $siteId = $candidateSiteId;
+        }
+
+        if (!$siteId) {
+            logWebhook($platformPdo, 'portone', $input, 'error', 'Unable to determine site_id from merchant_uid');
+            errorResponse('Unable to determine site_id', 400);
+        }
+
+        $sitePdo = getSiteDbConnectionBySiteId($siteId);
+        if (!$sitePdo) {
+            logWebhook($platformPdo, 'portone', $input, 'error', 'Site database not available for ' . $siteId);
+            errorResponse('Site database not available', 500);
+        }
         
         // 상태에 따른 처리
         switch ($payment['status']) {
             case 'paid':
-                handlePaidWebhook($pdo, $payment, $input);
+                handlePaidWebhook($sitePdo, $payment, $input);
                 break;
             case 'cancelled':
-                handleCancelledWebhook($pdo, $payment, $input);
+                handleCancelledWebhook($sitePdo, $payment, $input);
                 break;
             case 'ready':
                 // 가상계좌 발급 완료 또는 입금 대기
-                handleReadyWebhook($pdo, $payment, $input);
+                handleReadyWebhook($sitePdo, $payment, $input);
                 break;
             case 'failed':
-                handleFailedWebhook($pdo, $payment, $input);
+                handleFailedWebhook($sitePdo, $payment, $input);
                 break;
             default:
-                logWebhook($pdo, 'portone', $input, 'warning', 'Unknown status: ' . $payment['status']);
+                logWebhook($platformPdo, 'portone', $input, 'warning', 'Unknown status: ' . $payment['status']);
         }
         
         // 성공 응답
-        logWebhook($pdo, 'portone', $input, 'processed', 'Status: ' . $payment['status']);
+        logWebhook($platformPdo, 'portone', $input, 'processed', 'Status: ' . $payment['status']);
         successResponse(['status' => 'ok']);
         
     } catch (Exception $e) {
